@@ -2,8 +2,8 @@ package nano
 
 import (
 	"fmt"
-	"github.com/lonnng/nano/internal/message"
-	"github.com/lonnng/nano/session"
+	"github.com/heimeil/nano/internal/message"
+	"github.com/heimeil/nano/session"
 )
 
 type (

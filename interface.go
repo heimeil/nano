@@ -24,22 +24,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lonnng/nano/component"
-	"github.com/lonnng/nano/internal/message"
+	"github.com/heimeil/nano/component"
+	"github.com/heimeil/nano/internal/message"
 )
 
 // Listen listens on the TCP network address addr
 // and then calls Serve with handler to handle requests
 // on incoming connections.
 func Listen(addr string, opts ...Option) {
-	listen(addr, false, opts...)
+	listen(addr, TCP, opts...)
 }
 
 // ListenWS listens on the TCP network address addr
 // and then upgrades the HTTP server connection to the WebSocket protocol
 // to handle requests on incoming connections.
 func ListenWS(addr string, opts ...Option) {
-	listen(addr, true, opts...)
+	listen(addr, WebSocket, opts...)
+}
+
+// ListenHybrid include TCP and WebSocket.
+func ListenHybrid(addr string, opts ...Option) {
+	listen(addr, Hybrid, opts...)
 }
 
 // Register register a component with options

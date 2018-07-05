@@ -31,9 +31,21 @@ import (
 	"github.com/gorilla/websocket"
 	"strings"
 	"time"
+	"io"
+	"bytes"
+	"bufio"
+	"net/http/httptest"
 )
 
-func listen(addr string, isWs bool, opts ...Option) {
+type ServeType int
+
+const (
+	TCP       ServeType = iota
+	WebSocket
+	Hybrid
+)
+
+func listen(addr string, t ServeType, opts ...Option) {
 	for _, opt := range opts {
 		opt(handler.options)
 	}
@@ -49,10 +61,15 @@ func listen(addr string, isWs bool, opts ...Option) {
 	go handler.dispatch()
 
 	go func() {
-		if isWs {
-			listenAndServeWS(addr)
-		} else {
+		switch t {
+		case TCP:
 			listenAndServe(addr)
+		case WebSocket:
+			listenAndServeWS(addr)
+		case Hybrid:
+			listenAndServeHybrid(addr)
+		default:
+			logger.Fatal(fmt.Sprintf("unknown serve type %d, listen at %s", t, addr))
 		}
 	}()
 
@@ -113,5 +130,83 @@ func listenAndServeWS(addr string) {
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		logger.Fatal(err.Error())
+	}
+}
+
+func listenAndServeHybrid(addr string) {
+	var upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     env.checkOrigin,
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.Fatal(err.Error())
+	}
+
+	defer listener.Close()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			logger.Println(err.Error())
+			continue
+		}
+
+		go func() {
+			m := make([]byte, 3)
+			remain := 3
+
+			for {
+				n, err := conn.Read(m)
+				if err != nil {
+					logger.Println(err.Error())
+					conn.Close()
+					return
+				}
+
+				remain -= n
+				if remain == 0 {
+					break
+				}
+			}
+
+			// WebSocket upgrade: MUST be GET, MUST be HTTP1.1 or greater
+			if string(m) == "GET" {
+				r, err := http.ReadRequest(bufio.NewReader(io.MultiReader(bytes.NewReader(m), conn)))
+				if err != nil {
+					logger.Println(err.Error())
+					conn.Close()
+					return
+				}
+
+				rc := httptest.NewRecorder()
+				rw, err := newExtResponseWriter(rc, conn)
+				if err != nil {
+					logger.Println(err.Error())
+					conn.Close()
+					return
+				}
+
+				wsc, err := upgrader.Upgrade(rw, r, nil)
+				if err != nil {
+					logger.Println(err.Error())
+					conn.Close()
+					return
+				}
+
+				// actual response
+				_, err = io.Copy(conn, rc.Result().Body)
+				if err != nil {
+					logger.Println(err.Error())
+					conn.Close()
+					return
+				}
+
+				handler.handleWS(wsc)
+			} else {
+				handler.handle(newExtConn(m, conn))
+			}
+		}()
 	}
 }
